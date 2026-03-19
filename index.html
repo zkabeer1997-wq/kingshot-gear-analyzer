@@ -4,129 +4,38 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kingshot Gear Gap Analyzer V2</title>
+<link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #06080d; }
+body { background: #06080d; color: #e2e8f0; font-family: 'Oxanium', sans-serif; min-height: 100vh; }
+input, select, button { font-family: 'Oxanium', sans-serif; }
+input[type="number"] { background: #0f1520; border: 1px solid #1e2840; border-radius: 6px; color: #e2e8f0; padding: 6px 10px; font-size: 13px; font-family: 'IBM Plex Mono', monospace; width: 100%; outline: none; }
+input[type="number"]:focus { border-color: #f59e0b; }
+select { background: #0f1520; border: 1px solid #1e2840; border-radius: 6px; color: #e2e8f0; padding: 6px 10px; font-size: 13px; width: 100%; outline: none; cursor: pointer; }
+select:focus { border-color: #f59e0b; }
+input[type="text"], input[type="password"], input[type="search"] { background: #0f1520; border: 1px solid #1e2840; border-radius: 6px; color: #e2e8f0; padding: 6px 10px; font-size: 13px; width: 100%; outline: none; }
 #root { min-height: 100vh; }
-#loading { display:flex; align-items:center; justify-content:center; min-height:100vh; color:#64748b; font-family:sans-serif; font-size:14px; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-<div id="root"><div id="loading">Loading Kingshot Gear Gap Analyzer...</div></div>
+<div id="root"></div>
 <script>
-const {
-  useState,
-  useMemo,
-  useCallback,
-  useEffect
-} = React;
-
-// ═══════════════════════════════════════════════════════════════
-// SUPABASE + PERSISTENCE + IMPORT/EXPORT
-// ═══════════════════════════════════════════════════════════════
+const { useState, useMemo, useCallback, useEffect } = React;
 const SB_URL = 'https://pjqiwagkvuzmsyscamjk.supabase.co';
-// Anon key is safe to embed — security is handled by RLS policies
 const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqcWl3YWdrdnV6bXN5c2NhbWprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5MzMyMDUsImV4cCI6MjA4OTUwOTIwNX0.7vhokwRDWDfhEso3L88_TjqnGKDffHbwltm_s_Rq8m0';
 let sbClient = null;
-function initSupabase(anonKey) {
-  if (window.supabase && anonKey) {
-    sbClient = window.supabase.createClient(SB_URL, anonKey);
-  }
-}
-// Auto-connect with embedded key
-if (window.supabase) {
-  initSupabase(SB_ANON_KEY);
-}
+function initSupabase(k) { if (window.supabase && k) sbClient = window.supabase.createClient(SB_URL, k); }
+if (window.supabase) initSupabase(SB_ANON_KEY);
 const LS_KEY = 'ks-gear-analyzer-v2';
-function lsLoad() {
-  try {
-    return JSON.parse(localStorage.getItem(LS_KEY));
-  } catch (e) {
-    return null;
-  }
-}
-function lsSave(data) {
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(data));
-  } catch (e) {}
-}
-function exportJSON(data) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], {
-    type: 'application/json'
-  });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'kingshot-config-' + new Date().toISOString().slice(0, 10) + '.json';
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-function importJSON(cb) {
-  const inp = document.createElement('input');
-  inp.type = 'file';
-  inp.accept = '.json';
-  inp.onchange = e => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = ev => {
-      try {
-        cb(JSON.parse(ev.target.result));
-      } catch (e) {
-        alert('Invalid JSON');
-      }
-    };
-    r.readAsText(f);
-  };
-  inp.click();
-}
-async function sbInsert(table, data) {
-  if (!sbClient) return {
-    error: 'Connect Supabase first (Cloud tab)'
-  };
-  try {
-    const {
-      error
-    } = await sbClient.from(table).insert(data);
-    return error ? {
-      error: error.message
-    } : {
-      ok: true
-    };
-  } catch (e) {
-    return {
-      error: e.message
-    };
-  }
-}
-async function sbSelect(table, adminPassphrase) {
-  if (!sbClient) return {
-    error: 'Supabase not connected'
-  };
-  try {
-    // Use direct REST API with custom header for RLS admin policy
-    const resp = await fetch(`${SB_URL}/rest/v1/${table}?select=*&limit=200`, {
-      headers: {
-        'apikey': SB_ANON_KEY,
-        'Authorization': `Bearer ${SB_ANON_KEY}`,
-        'x-admin-key': adminPassphrase || ''
-      }
-    });
-    if (!resp.ok) return {
-      error: `HTTP ${resp.status}: ${resp.statusText}`
-    };
-    const data = await resp.json();
-    return {
-      data
-    };
-  } catch (e) {
-    return {
-      error: e.message
-    };
-  }
-}
+function lsLoad() { try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch(e) { return null; } }
+function lsSave(data) { try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch(e) {} }
+function exportJSON(data) { const b = new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'kingshot-config-'+new Date().toISOString().slice(0,10)+'.json'; a.click(); URL.revokeObjectURL(a.href); }
+function importJSON(cb) { const i = document.createElement('input'); i.type='file'; i.accept='.json'; i.onchange=e=>{const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>{try{cb(JSON.parse(ev.target.result))}catch(e){alert('Invalid JSON')}}; r.readAsText(f)}; i.click(); }
+async function sbInsert(table, data) { if (!sbClient) return {error:'Not connected'}; try { const {error}=await sbClient.from(table).insert(data); return error?{error:error.message}:{ok:true}; } catch(e){return{error:e.message}} }
+async function sbSelect(table, adminKey) { if (!sbClient) return {error:'Not connected'}; try { const r=await fetch(SB_URL+'/rest/v1/'+table+'?select=*&limit=200',{headers:{'apikey':SB_ANON_KEY,'Authorization':'Bearer '+SB_ANON_KEY,'x-admin-key':adminKey||''}}); if(!r.ok) return{error:'HTTP '+r.status}; return{data:await r.json()}; } catch(e){return{error:e.message}} }
 
 // ═══════════════════════════════════════════════════════════════
 // KINGSHOT GEAR GAP ANALYZER V2 — Complete Data Model
@@ -1629,44 +1538,142 @@ function makeMyDefaults() {
 // STYLE HELPERS
 // ═══════════════════════════════════════════════════════════════
 
+// Simulator-matching design tokens
+const C = {
+  bg: "#06080d",
+  bg2: "#0c1018",
+  panel: "#101520",
+  panelBorder: "#1a2035",
+  panelHover: "#151d30",
+  accent: "#f59e0b",
+  accentDim: "#92620a",
+  red: "#ef4444",
+  redDim: "#7f1d1d",
+  blue: "#3b82f6",
+  blueDim: "#1e3a5f",
+  green: "#22c55e",
+  greenDim: "#14532d",
+  violet: "#a78bfa",
+  text: "#e2e8f0",
+  textDim: "#64748b",
+  textMuted: "#475569",
+  inputBg: "#0f1520",
+  inputBorder: "#1e2840",
+  fontDisplay: "'Oxanium', sans-serif",
+  fontMono: "'IBM Plex Mono', monospace"
+};
 const S = {
   sel: {
     width: "100%",
-    padding: "5px 6px",
-    borderRadius: 5,
-    border: "1px solid rgba(255,255,255,0.12)",
-    background: "rgba(0,0,0,0.35)",
-    color: "#e2e8f0",
-    fontSize: 11
+    padding: "6px 10px",
+    borderRadius: 6,
+    border: `1px solid ${C.inputBorder}`,
+    background: C.inputBg,
+    color: C.text,
+    fontSize: 13,
+    fontFamily: C.fontDisplay,
+    outline: "none",
+    cursor: "pointer"
   },
   numIn: {
-    width: 48,
-    padding: "4px 5px",
-    borderRadius: 5,
-    border: "1px solid rgba(255,255,255,0.12)",
-    background: "rgba(0,0,0,0.35)",
-    color: "#e2e8f0",
-    fontSize: 11,
-    textAlign: "center"
+    width: 56,
+    padding: "6px 10px",
+    borderRadius: 6,
+    border: `1px solid ${C.inputBorder}`,
+    background: C.inputBg,
+    color: C.text,
+    fontSize: 13,
+    fontFamily: C.fontMono,
+    textAlign: "center",
+    outline: "none"
   },
   card: {
-    padding: 12,
-    borderRadius: 10,
-    background: "rgba(0,0,0,0.25)",
-    border: "1px solid rgba(255,255,255,0.06)"
+    padding: 16,
+    borderRadius: 12,
+    background: C.panel,
+    border: `1px solid ${C.panelBorder}`
   },
-  btn: (active, color) => ({
+  panel: {
     flex: 1,
-    padding: "7px 4px",
-    borderRadius: 5,
-    border: "none",
-    cursor: "pointer",
+    minWidth: 320,
+    background: C.panel,
+    borderRadius: 12,
+    border: `1px solid ${C.panelBorder}`,
+    overflow: "hidden"
+  },
+  panelHeader: color => ({
+    padding: "12px 16px",
+    borderBottom: `1px solid ${C.panelBorder}`,
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: `linear-gradient(135deg, ${color}08, transparent)`
+  }),
+  dot: color => ({
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    background: color,
+    boxShadow: `0 0 10px ${color}80`,
+    flexShrink: 0
+  }),
+  panelBody: {
+    padding: 16,
+    display: "flex",
+    flexDirection: "column",
+    gap: 14
+  },
+  fieldLabel: {
+    display: "block",
+    fontSize: 10,
+    color: C.textDim,
+    fontWeight: 600,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    marginBottom: 4,
+    fontFamily: C.fontDisplay
+  },
+  sectionDivider: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: C.textDim,
+    letterSpacing: "0.06em",
+    borderBottom: `1px solid ${C.panelBorder}`,
+    paddingBottom: 4,
+    textTransform: "uppercase"
+  },
+  totalBox: {
+    padding: "10px 14px",
+    background: C.inputBg,
+    borderRadius: 8,
+    border: `1px solid ${C.inputBorder}`
+  },
+  badge: color => ({
+    display: "inline-block",
+    padding: "2px 8px",
+    borderRadius: 4,
     fontSize: 10,
     fontWeight: 700,
-    letterSpacing: 0.5,
+    letterSpacing: "0.06em",
     textTransform: "uppercase",
-    background: active ? `${color || "#60a5fa"}22` : "rgba(0,0,0,0.25)",
-    color: active ? color || "#60a5fa" : "#64748b",
+    background: `${color}1e`,
+    color: color,
+    border: `1px solid ${color}33`
+  }),
+  btn: (active, color) => ({
+    flex: 1,
+    padding: "10px 6px",
+    borderRadius: "8px 8px 0 0",
+    border: "1px solid transparent",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: "0.02em",
+    fontFamily: C.fontDisplay,
+    background: active ? C.panel : "transparent",
+    color: active ? color || C.accent : C.textDim,
+    borderColor: active ? C.panelBorder : "transparent",
+    borderBottomColor: active ? C.panel : "transparent",
     transition: "all 0.2s"
   })
 };
@@ -1787,7 +1794,8 @@ function PlayerPanel({
   title,
   color,
   data,
-  setData
+  setData,
+  section
 }) {
   const updateGov = useCallback((k, v) => setData(d => ({
     ...d,
@@ -1823,100 +1831,69 @@ function PlayerPanel({
       charms: c
     };
   }), [setData]);
-  const [sec, setSec] = useState("gov");
   const setB = calcSetBonuses(data.govGear);
   return /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1,
-      minWidth: 280
-    }
+    style: S.panel
   }, /*#__PURE__*/React.createElement("div", {
+    style: S.panelHeader(color)
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.dot(color)
+  }), /*#__PURE__*/React.createElement("h2", {
     style: {
-      textAlign: "center",
-      padding: "8px 0 6px",
-      borderBottom: `2px solid ${color}`,
-      marginBottom: 10
-    }
-  }, /*#__PURE__*/React.createElement("h2", {
-    style: {
+      fontSize: 15,
+      fontWeight: 700,
       margin: 0,
-      fontSize: 14,
-      fontWeight: 800,
-      color,
-      letterSpacing: 1,
-      textTransform: "uppercase"
+      fontFamily: C.fontDisplay
     }
-  }, title)), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 3,
-      marginBottom: 8
-    }
-  }, [["gov", "Gov Gear"], ["charm", "Charms"], ["hero", "Hero Gear"]].map(([id, lb]) => /*#__PURE__*/React.createElement("button", {
-    key: id,
-    onClick: () => setSec(sec === id ? null : id),
-    style: S.btn(sec === id, color)
-  }, lb))), sec === "gov" && /*#__PURE__*/React.createElement("div", {
+  }, title), /*#__PURE__*/React.createElement("span", {
+    style: S.badge(color)
+  }, title === "You" ? "ATTACKER" : "DEFENDER")), /*#__PURE__*/React.createElement("div", {
+    style: S.panelBody
+  }, section === "gov" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gap: 5
+      gap: 8
     }
   }, GOV_GEAR_PIECES.map(p => /*#__PURE__*/React.createElement("div", {
     key: p.key,
     style: {
-      display: "flex",
+      display: "grid",
+      gridTemplateColumns: "80px 1fr",
       alignItems: "center",
-      gap: 5
+      gap: 8
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 11,
-      minWidth: 72,
-      color: TROOP_COLORS[p.troop],
-      fontWeight: 600
+      ...S.fieldLabel,
+      marginBottom: 0,
+      color: TROOP_COLORS[p.troop]
     }
-  }, p.icon, " ", p.label), /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1
-    }
-  }, /*#__PURE__*/React.createElement(GovGearSelect, {
+  }, p.icon, " ", p.label), /*#__PURE__*/React.createElement(GovGearSelect, {
     value: data.govGear[p.key],
     onChange: v => updateGov(p.key, v)
-  })))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: "6px 8px",
-      borderRadius: 6,
-      background: "rgba(0,0,0,0.2)",
-      fontSize: 10
-    }
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: S.totalBox
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#fbbf24",
-      fontWeight: 700,
-      marginBottom: 3
+      ...S.fieldLabel,
+      marginBottom: 2
     }
-  }, "Set Bonuses (all troops)"), /*#__PURE__*/React.createElement("div", {
+  }, "SET BONUSES (ALL TROOPS)"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      justifyContent: "space-between"
+      justifyContent: "space-between",
+      fontSize: 13,
+      fontFamily: C.fontMono
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "#94a3b8"
+      color: C.green
     }
-  }, "3pc (", setB.tier3Name, "): ", /*#__PURE__*/React.createElement("span", {
+  }, "3pc: +", setB.def3, "% Def"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "#4ade80"
+      color: C.blue
     }
-  }, "+", setB.def3, "% Def")), /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: "#94a3b8"
-    }
-  }, "6pc (", setB.tier6Name, "): ", /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: "#60a5fa"
-    }
-  }, "+", setB.atk6, "% Atk"))))), sec === "charm" && /*#__PURE__*/React.createElement("div", {
+  }, "6pc: +", setB.atk6, "% Atk")))), section === "charm" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gap: 6
@@ -1932,8 +1909,8 @@ function PlayerPanel({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 11,
-      fontWeight: 700,
+      ...S.fieldLabel,
+      marginBottom: 0,
       color: TROOP_COLORS[troop]
     }
   }, TROOP_NAMES[troop]), /*#__PURE__*/React.createElement("div", {
@@ -1948,10 +1925,11 @@ function PlayerPanel({
       padding: "1px 5px",
       fontSize: 9,
       borderRadius: 3,
-      border: "1px solid rgba(255,255,255,0.08)",
-      background: "rgba(0,0,0,0.3)",
-      color: "#94a3b8",
-      cursor: "pointer"
+      border: `1px solid ${C.inputBorder}`,
+      background: C.inputBg,
+      color: C.textDim,
+      cursor: "pointer",
+      fontFamily: C.fontDisplay
     }
   }, "All ", lv)))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1963,7 +1941,7 @@ function PlayerPanel({
     key: s.key,
     value: data.charms[s.key],
     onChange: v => updateCharm(s.key, v)
-  })))))), sec === "hero" && /*#__PURE__*/React.createElement("div", {
+  })))))), section === "hero" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gap: 6
@@ -1972,8 +1950,7 @@ function PlayerPanel({
     key: hero
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
-      fontWeight: 700,
+      ...S.fieldLabel,
       color: TROOP_COLORS[hero],
       marginBottom: 3
     }
@@ -1991,16 +1968,18 @@ function PlayerPanel({
         display: "flex",
         alignItems: "center",
         gap: 4,
-        padding: "3px 6px",
-        borderRadius: 5,
-        background: "rgba(0,0,0,0.15)",
+        padding: "4px 8px",
+        borderRadius: 6,
+        background: C.inputBg,
+        border: `1px solid ${C.inputBorder}`,
         flexWrap: "wrap"
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
-        minWidth: 52,
-        color: "#cbd5e1"
+        fontSize: 11,
+        minWidth: 55,
+        color: C.text,
+        fontWeight: 600
       }
     }, s.icon, " ", s.label), /*#__PURE__*/React.createElement("button", {
       onClick: () => updateHero(s.key, "isRed", !g.isRed),
@@ -2011,8 +1990,9 @@ function PlayerPanel({
         border: "none",
         cursor: "pointer",
         fontWeight: 700,
-        background: g.isRed ? "rgba(239,68,68,0.25)" : "rgba(234,179,8,0.25)",
-        color: g.isRed ? "#f87171" : "#fbbf24"
+        fontFamily: C.fontDisplay,
+        background: g.isRed ? `${C.red}33` : `${C.accent}33`,
+        color: g.isRed ? C.red : C.accent
       }
     }, g.isRed ? "RED" : "MYTH"), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -2023,7 +2003,7 @@ function PlayerPanel({
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 9,
-        color: "#64748b"
+        color: C.textDim
       }
     }, "+"), /*#__PURE__*/React.createElement("input", {
       type: "number",
@@ -2041,7 +2021,7 @@ function PlayerPanel({
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 9,
-        color: "#64748b"
+        color: C.textDim
       }
     }, "F"), /*#__PURE__*/React.createElement("input", {
       type: "number",
@@ -2051,12 +2031,14 @@ function PlayerPanel({
       onChange: e => updateHero(s.key, "forge", Math.max(0, Math.min(20, Number(e.target.value) || 0))),
       style: {
         ...S.numIn,
-        width: 38
+        width: 42
       }
     })), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 9,
-        color: "#64748b",
+        fontSize: 11,
+        color: C.accent,
+        fontFamily: C.fontMono,
+        fontWeight: 600,
         marginLeft: "auto"
       }
     }, calcHeroGearStat(g.enhance, g.forge, g.isRed).toFixed(1), "%"));
@@ -2064,17 +2046,18 @@ function PlayerPanel({
     style: {
       display: "flex",
       alignItems: "center",
-      gap: 6,
-      padding: "5px 6px",
-      borderRadius: 5,
-      background: "rgba(0,0,0,0.15)"
+      gap: 8,
+      padding: "6px 8px",
+      borderRadius: 6,
+      background: C.inputBg,
+      border: `1px solid ${C.inputBorder}`
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 11,
-      color: "#cbd5e1"
+      ...S.fieldLabel,
+      marginBottom: 0
     }
-  }, "\uD83D\uDC3E Pet Power"), /*#__PURE__*/React.createElement("input", {
+  }, "\uD83D\uDC3E PET POWER"), /*#__PURE__*/React.createElement("input", {
     type: "number",
     value: data.petPower,
     min: 0,
@@ -2084,9 +2067,9 @@ function PlayerPanel({
     })),
     style: {
       ...S.numIn,
-      width: 72
+      width: 80
     }
-  }))));
+  })))));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -4168,18 +4151,67 @@ function optimizeFormation(atk, def, total) {
 
 // Simplified battle sim for stat-gap analysis (uses BR stats directly)
 function simulateBattle(myBR, oppBR) {
-  const myOffense = (1 + (myBR.atk || 0) / 100) * (1 + (myBR.leth || 0) / 100);
-  const myDefense = (1 + (myBR.def || 0) / 100) * (1 + (myBR.hp || 0) / 100);
-  const oppOffense = (1 + (oppBR.atk || 0) / 100) * (1 + (oppBR.leth || 0) / 100);
-  const oppDefense = (1 + (oppBR.def || 0) / 100) * (1 + (oppBR.hp || 0) / 100);
-  const myTroops = (myBR.inf || 0) + (myBR.cav || 0) + (myBR.arch || 0);
-  const oppTroops = (oppBR.inf || 0) + (oppBR.cav || 0) + (oppBR.arch || 0);
-  const myDmg = Math.sqrt(myTroops || 1) * myOffense / (oppDefense || 1);
-  const oppDmg = Math.sqrt(oppTroops || 1) * oppOffense / (myDefense || 1);
+  // Per-troop damage: Kills = sqrt(Troops) × (Atk × Leth) / (EnemyDef × EnemyHP)
+  let myDmgTotal = 0,
+    oppDmgTotal = 0;
+  const myPerTroop = {},
+    oppPerTroop = {};
+  const myInjured = {},
+    oppInjured = {};
+  for (const t of ["inf", "cav", "arch"]) {
+    const myT = myBR[t] || 0;
+    const oppT = oppBR[t] || 0;
+    const myAtk = 1 + (myBR[t + "Atk"] || myBR.atk || 0) / 100;
+    const myLeth = 1 + (myBR[t + "Leth"] || myBR.leth || 0) / 100;
+    const myDef = 1 + (myBR[t + "Def"] || myBR.def || 0) / 100;
+    const myHp = 1 + (myBR[t + "Hp"] || myBR.hp || 0) / 100;
+    const oppAtk = 1 + (oppBR[t + "Atk"] || oppBR.atk || 0) / 100;
+    const oppLeth = 1 + (oppBR[t + "Leth"] || oppBR.leth || 0) / 100;
+    const oppDef = 1 + (oppBR[t + "Def"] || oppBR.def || 0) / 100;
+    const oppHp = 1 + (oppBR[t + "Hp"] || oppBR.hp || 0) / 100;
+
+    // My troops damage to opponent's troops of same type
+    const myDmg = myT > 0 ? Math.sqrt(myT) * (myAtk * myLeth) / (oppDef * oppHp || 1) : 0;
+    // Opponent's troops damage to my troops of same type
+    const oppDmg = oppT > 0 ? Math.sqrt(oppT) * (oppAtk * oppLeth) / (myDef * myHp || 1) : 0;
+    myPerTroop[t] = myDmg;
+    oppPerTroop[t] = oppDmg;
+    myDmgTotal += myDmg;
+    oppDmgTotal += oppDmg;
+
+    // Troops injured: proportional to damage received relative to total damage capacity
+    // Opponent's damage to my troops → my injured; My damage to opp troops → opp injured
+    // Scale: damage as proportion of troop count (capped at troop count)
+    const myTotalDmgCapacity = myDmgTotal || 1;
+    const oppTotalDmgCapacity = oppDmgTotal || 1;
+  }
+
+  // Calculate injured troops: distribute total enemy damage proportionally across your troop types by count
+  const myTotal = (myBR.inf || 0) + (myBR.cav || 0) + (myBR.arch || 0);
+  const oppTotal = (oppBR.inf || 0) + (oppBR.cav || 0) + (oppBR.arch || 0);
+  for (const t of ["inf", "cav", "arch"]) {
+    const myT = myBR[t] || 0;
+    const oppT = oppBR[t] || 0;
+    // Opponent damages my troops proportional to their damage vs my troop's defense
+    // Injured = opponent's per-troop damage / total opponent damage * total damage ratio * my troop count
+    const oppDmgToMe = oppPerTroop[t] || 0;
+    const myDmgToOpp = myPerTroop[t] || 0;
+    // Scale: injured = troop_count × (enemy_damage_to_this_type / (enemy_damage_to_this_type + my_resistance))
+    // Simpler approach: injured ≈ min(troopCount, troopCount × oppDmg/(oppDmg + myDmg) × damageIntensity)
+    const totalDmg = myDmgTotal + oppDmgTotal || 1;
+    myInjured[t] = Math.min(myT, Math.round(myT * oppDmgToMe / (oppDmgToMe + (myPerTroop[t] || 1)) * (oppDmgTotal / (myDmgTotal || 1))));
+    oppInjured[t] = Math.min(oppT, Math.round(oppT * myDmgToOpp / (myDmgToOpp + (oppPerTroop[t] || 1)) * (myDmgTotal / (oppDmgTotal || 1))));
+  }
   return {
-    myDmg,
-    oppDmg,
-    ratio: myDmg / (oppDmg || 1)
+    myDmg: myDmgTotal,
+    oppDmg: oppDmgTotal,
+    ratio: myDmgTotal / (oppDmgTotal || 1),
+    myPerTroop,
+    oppPerTroop,
+    myInjured,
+    oppInjured,
+    myTotalInjured: (myInjured.inf || 0) + (myInjured.cav || 0) + (myInjured.arch || 0),
+    oppTotalInjured: (oppInjured.inf || 0) + (oppInjured.cav || 0) + (oppInjured.arch || 0)
   };
 }
 function calcStatNeededToWin(myBR, oppBR) {
@@ -4190,22 +4222,23 @@ function calcStatNeededToWin(myBR, oppBR) {
     needs: []
   };
   const needs = [];
-  for (const [stat, label] of [["atk", "Attack"], ["leth", "Lethality"], ["def", "Defense"], ["hp", "Health"]]) {
+  // Test each stat across all troops
+  for (const [suffix, label] of [["Atk", "Attack"], ["Leth", "Lethality"], ["Def", "Defense"], ["Hp", "Health"]]) {
     let lo = 0,
       hi = 500;
     for (let iter = 0; iter < 30; iter++) {
       const mid = (lo + hi) / 2;
       const testBR = {
-        ...myBR,
-        [stat]: (myBR[stat] || 0) + mid
+        ...myBR
       };
+      for (const t of ["inf", "cav", "arch"]) testBR[t + suffix] = (myBR[t + suffix] || 0) + mid;
       if (simulateBattle(testBR, oppBR).ratio >= 1) hi = mid;else lo = mid;
     }
     needs.push({
-      stat,
+      stat: suffix.toLowerCase(),
       label,
       needed: Math.ceil(hi),
-      isOffensive: stat === "atk" || stat === "leth"
+      isOffensive: suffix === "Atk" || suffix === "Leth"
     });
   }
   return {
@@ -4249,12 +4282,8 @@ function BattleReportPanel({
     ...d,
     [k]: v
   }));
-  const inp = (key, label) => /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 9,
-      color: "#64748b",
-      marginBottom: 2
-    }
+  const statInput = (key, label) => /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: S.fieldLabel
   }, label), /*#__PURE__*/React.createElement("input", {
     type: "number",
     value: data[key] || 0,
@@ -4262,89 +4291,117 @@ function BattleReportPanel({
     onChange: e => upd(key, Number(e.target.value) || 0),
     style: S.numIn
   }));
+  const troopTypes = [{
+    key: "inf",
+    label: "⚔ Infantry",
+    color: TROOP_COLORS.inf
+  }, {
+    key: "cav",
+    label: "🐴 Cavalry",
+    color: TROOP_COLORS.cav
+  }, {
+    key: "arch",
+    label: "🏹 Archer",
+    color: TROOP_COLORS.arch
+  }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: "10px 12px",
+      padding: "12px 14px",
       borderRadius: 8,
-      background: "rgba(0,0,0,0.2)",
+      background: C.inputBg,
       border: `1px solid ${color}33`
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 12,
       fontWeight: 800,
       color,
-      marginBottom: 6,
-      letterSpacing: 1
+      marginBottom: 8,
+      letterSpacing: "0.04em"
     }
   }, title), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 9,
-      fontWeight: 700,
-      color: "#64748b",
-      marginBottom: 3
-    }
+    style: S.sectionDivider
   }, "TROOPS"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr 1fr",
-      gap: 4,
-      marginBottom: 6
+      gap: 6,
+      margin: "8px 0 12px"
     }
-  }, inp("inf", "⚔ Infantry"), inp("cav", "🐴 Cavalry"), inp("arch", "🏹 Archer")), /*#__PURE__*/React.createElement("div", {
+  }, troopTypes.map(t => statInput(t.key, t.label))), troopTypes.map(t => /*#__PURE__*/React.createElement("div", {
+    key: t.key,
     style: {
-      fontSize: 9,
-      fontWeight: 700,
-      color: "#64748b",
-      marginBottom: 3
+      marginBottom: 10
     }
-  }, "STAT BONUSES (%)"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...S.sectionDivider,
+      color: t.color
+    }
+  }, t.label, " STATS (%)"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr 1fr 1fr",
       gap: 4,
-      marginBottom: 6
+      marginTop: 6
     }
-  }, inp("atk", "ATK %"), inp("leth", "LETH %"), inp("def", "DEF %"), inp("hp", "HP %")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 9,
-      fontWeight: 700,
-      color: "#64748b",
-      marginBottom: 3
-    }
+  }, statInput(t.key + "Atk", "ATK"), statInput(t.key + "Def", "DEF"), statInput(t.key + "Leth", "LETH"), statInput(t.key + "Hp", "HP")))), /*#__PURE__*/React.createElement("div", {
+    style: S.sectionDivider
   }, "HEROES & SETUP"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: 3,
-      marginBottom: 4
+      gap: 6,
+      marginTop: 8,
+      marginBottom: 8
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 8,
-      color: "#475569"
-    }
-  }, "Tier"), /*#__PURE__*/React.createElement("select", {
-    value: data.tier || "T10",
-    onChange: e => upd("tier", e.target.value),
-    style: {
-      ...S.sel,
-      fontSize: 10
-    }
-  }, Object.keys(TROOP_TIERS).map(t => /*#__PURE__*/React.createElement("option", {
-    key: t,
-    value: t
-  }, t))))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 8,
-      color: "#475569",
-      marginBottom: 2
-    }
-  }, "Lead Heroes (all 3 skills)"), /*#__PURE__*/React.createElement("div", {
+  }, troopTypes.map(t => /*#__PURE__*/React.createElement("div", {
+    key: t.key,
     style: {
       display: "grid",
-      gap: 2,
-      marginBottom: 4
+      gridTemplateColumns: "80px 1fr 1fr",
+      gap: 4,
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      ...S.fieldLabel,
+      marginBottom: 0,
+      color: t.color
+    }
+  }, t.label.split(" ")[1]), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: S.fieldLabel
+  }, "TG Level"), /*#__PURE__*/React.createElement("select", {
+    value: data[t.key + "Tg"] || 5,
+    onChange: e => upd(t.key + "Tg", Number(e.target.value)),
+    style: {
+      ...S.sel,
+      fontSize: 11
+    }
+  }, [1, 2, 3, 4, 5].map(n => /*#__PURE__*/React.createElement("option", {
+    key: n,
+    value: n
+  }, "TG ", n)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: S.fieldLabel
+  }, "Troop Tier"), /*#__PURE__*/React.createElement("select", {
+    value: data[t.key + "Tier"] || "T10",
+    onChange: e => upd(t.key + "Tier", e.target.value),
+    style: {
+      ...S.sel,
+      fontSize: 11
+    }
+  }, ["T6", "T7", "T8", "T9", "T10", "T11"].map(t => /*#__PURE__*/React.createElement("option", {
+    key: t,
+    value: t
+  }, t))))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...S.fieldLabel,
+      marginTop: 4
+    }
+  }, "LEAD HEROES (ALL 3 SKILLS)"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gap: 3,
+      marginBottom: 6
     }
   }, [0, 1, 2].map(i => /*#__PURE__*/React.createElement(HeroSelect, {
     key: i,
@@ -4356,15 +4413,11 @@ function BattleReportPanel({
       upd("leaders", l);
     }
   }))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 8,
-      color: "#475569",
-      marginBottom: 2
-    }
-  }, "Joiners (skill 1 only)"), /*#__PURE__*/React.createElement("div", {
+    style: S.fieldLabel
+  }, "JOINERS (SKILL 1 ONLY)"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gap: 2
+      gap: 3
     }
   }, [0, 1, 2, 3].map(i => /*#__PURE__*/React.createElement(HeroSelect, {
     key: i,
@@ -4394,9 +4447,6 @@ const TABS = [{
 }, {
   id: "reference",
   label: "📖 Reference"
-}, {
-  id: "cloud",
-  label: "☁️ Cloud"
 }];
 function App() {
   const [tab, setTab] = useState("compare");
@@ -4404,15 +4454,29 @@ function App() {
   const [oppData, setOppData] = useState(makeDefaultPlayer);
 
   // Battle Report stats (from in-game battle reports) + hero setup
+  // Per-troop stats: inf/cav/arch each have atk/def/leth/hp + tg (1-5) + tier (T6-T11)
   const [myBR, setMyBR] = useState({
     inf: 8000,
     cav: 15000,
     arch: 37000,
-    atk: 130,
-    leth: 50,
-    def: 65,
-    hp: 45,
-    tier: "T10",
+    infAtk: 130,
+    infDef: 65,
+    infLeth: 50,
+    infHp: 45,
+    cavAtk: 140,
+    cavDef: 60,
+    cavLeth: 55,
+    cavHp: 40,
+    archAtk: 120,
+    archDef: 70,
+    archLeth: 45,
+    archHp: 50,
+    infTg: 5,
+    cavTg: 5,
+    archTg: 5,
+    infTier: "T10",
+    cavTier: "T10",
+    archTier: "T10",
     leaders: ["Amadeus", null, null],
     joiners: [null, null, null, null]
   });
@@ -4420,11 +4484,24 @@ function App() {
     inf: 12000,
     cav: 10000,
     arch: 28000,
-    atk: 90,
-    leth: 35,
-    def: 100,
-    hp: 80,
-    tier: "T10",
+    infAtk: 90,
+    infDef: 100,
+    infLeth: 35,
+    infHp: 80,
+    cavAtk: 95,
+    cavDef: 90,
+    cavLeth: 40,
+    cavHp: 75,
+    archAtk: 85,
+    archDef: 95,
+    archLeth: 30,
+    archHp: 85,
+    infTg: 5,
+    cavTg: 5,
+    archTg: 5,
+    infTier: "T10",
+    cavTier: "T10",
+    archTier: "T10",
     leaders: ["Eric", null, null],
     joiners: [null, null, null, null]
   });
@@ -4446,30 +4523,30 @@ function App() {
 
   // Full battle calc with heroes (for joiner/formation optimizer)
   const fullBattleAtk = useMemo(() => ({
-    tier: myBR.tier || "T10",
+    tier: myBR.infTier || "T10",
     troops: {
       Infantry: myBR.inf || 0,
       Cavalry: myBR.cav || 0,
       Archer: myBR.arch || 0
     },
-    atkBonus: myBR.atk || 0,
-    lethBonus: myBR.leth || 0,
-    defBonus: myBR.def || 0,
-    hpBonus: myBR.hp || 0,
+    atkBonus: ((myBR.infAtk || 0) + (myBR.cavAtk || 0) + (myBR.archAtk || 0)) / 3,
+    lethBonus: ((myBR.infLeth || 0) + (myBR.cavLeth || 0) + (myBR.archLeth || 0)) / 3,
+    defBonus: ((myBR.infDef || 0) + (myBR.cavDef || 0) + (myBR.archDef || 0)) / 3,
+    hpBonus: ((myBR.infHp || 0) + (myBR.cavHp || 0) + (myBR.archHp || 0)) / 3,
     leaders: (myBR.leaders || []).filter(Boolean),
     joiners: (myBR.joiners || []).filter(Boolean)
   }), [myBR]);
   const fullBattleDef = useMemo(() => ({
-    tier: oppBR.tier || "T10",
+    tier: oppBR.infTier || "T10",
     troops: {
       Infantry: oppBR.inf || 0,
       Cavalry: oppBR.cav || 0,
       Archer: oppBR.arch || 0
     },
-    atkBonus: oppBR.atk || 0,
-    lethBonus: oppBR.leth || 0,
-    defBonus: oppBR.def || 0,
-    hpBonus: oppBR.hp || 0,
+    atkBonus: ((oppBR.infAtk || 0) + (oppBR.cavAtk || 0) + (oppBR.archAtk || 0)) / 3,
+    lethBonus: ((oppBR.infLeth || 0) + (oppBR.cavLeth || 0) + (oppBR.archLeth || 0)) / 3,
+    defBonus: ((oppBR.infDef || 0) + (oppBR.cavDef || 0) + (oppBR.archDef || 0)) / 3,
+    hpBonus: ((oppBR.infHp || 0) + (oppBR.cavHp || 0) + (oppBR.archHp || 0)) / 3,
     leaders: (oppBR.leaders || []).filter(Boolean),
     joiners: (oppBR.joiners || []).filter(Boolean)
   }), [oppBR]);
@@ -4484,17 +4561,18 @@ function App() {
   // Joiner optimizer (only run when recommend tab is active and we have data)
   const [joinerResults, setJoinerResults] = useState(null);
   const [formationResults, setFormationResults] = useState(null);
+  const [showAllRecs, setShowAllRecs] = useState(false);
 
   // Cloud tab state
-  const [sbAnonKey, setSbAnonKey] = useState(SB_ANON_KEY);
-  const [sbConnected, setSbConnected] = useState(true);
+  const [sbConnected] = useState(!!sbClient);
   const [adminKey, setAdminKey] = useState('');
   const [cloudMsg, setCloudMsg] = useState('');
   const [cloudData, setCloudData] = useState(null);
+  const autoSaveTimer = React.useRef(null);
 
   // Auto-save to localStorage whenever data changes
   useEffect(() => {
-    lsSave({
+    if (typeof lsSave === 'function') lsSave({
       myData,
       oppData,
       myBR,
@@ -4502,77 +4580,84 @@ function App() {
     });
   }, [myData, oppData, myBR, oppBR]);
 
+  // Auto-submit to Supabase (debounced — saves 3 seconds after last change)
+  useEffect(() => {
+    if (!sbClient) return;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      // Only auto-save if there's meaningful data (at least some troops or gear set)
+      const hasBRData = myBR.inf + myBR.cav + myBR.arch > 0;
+      const hasGearData = Object.values(myData.govGear || {}).some(v => v !== "none");
+      if (hasBRData) {
+        sbInsert('battle_reports', {
+          governor_name: 'Auto',
+          kingdom: 'Auto',
+          atk_inf: myBR.inf,
+          atk_cav: myBR.cav,
+          atk_arch: myBR.arch,
+          atk_bonus: myBR.atk,
+          leth_bonus: myBR.leth,
+          def_bonus: myBR.def,
+          hp_bonus: myBR.hp,
+          atk_tier: myBR.tier || 'T10',
+          atk_leaders: (myBR.leaders || []).filter(Boolean),
+          atk_joiners: (myBR.joiners || []).filter(Boolean),
+          def_inf: oppBR.inf,
+          def_cav: oppBR.cav,
+          def_arch: oppBR.arch,
+          def_atk_bonus: oppBR.atk,
+          def_leth_bonus: oppBR.leth,
+          def_def_bonus: oppBR.def,
+          def_hp_bonus: oppBR.hp,
+          def_tier: oppBR.tier || 'T10',
+          def_leaders: (oppBR.leaders || []).filter(Boolean),
+          def_joiners: (oppBR.joiners || []).filter(Boolean),
+          predicted_ratio: battleResult ? battleResult.ratio : null,
+          outcome: 'unknown'
+        }).catch(() => {});
+      }
+      if (hasGearData) {
+        sbInsert('gear_configs', {
+          governor_name: 'Auto',
+          kingdom: 'Auto',
+          gear_data: {
+            myData,
+            myBR
+          },
+          profile_type: 'full'
+        }).catch(() => {});
+      }
+    }, 3000);
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+  }, [myData, oppData, myBR, oppBR, battleResult]);
+
   // Load from localStorage on mount
   useEffect(() => {
-    const saved = lsLoad();
-    if (saved) {
-      if (saved.myData) setMyData(saved.myData);
-      if (saved.oppData) setOppData(saved.oppData);
-      if (saved.myBR) setMyBR(saved.myBR);
-      if (saved.oppBR) setOppBR(saved.oppBR);
+    if (typeof lsLoad === 'function') {
+      const saved = lsLoad();
+      if (saved) {
+        if (saved.myData) setMyData(saved.myData);
+        if (saved.oppData) setOppData(saved.oppData);
+        if (saved.myBR) setMyBR(saved.myBR);
+        if (saved.oppBR) setOppBR(saved.oppBR);
+      }
     }
   }, []);
-  const connectSupabase = () => {
-    if (!sbAnonKey) {
-      setCloudMsg('Enter your Supabase anon key');
-      return;
-    }
-    localStorage.setItem('ks-sb-anon-key', sbAnonKey);
-    initSupabase(sbAnonKey);
-    setSbConnected(true);
-    setCloudMsg('Connected to Supabase!');
-  };
-  const submitBattleReport = async () => {
-    const payload = {
-      governor_name: 'Anonymous',
-      kingdom: 'Unknown',
-      atk_inf: myBR.inf,
-      atk_cav: myBR.cav,
-      atk_arch: myBR.arch,
-      atk_bonus: myBR.atk,
-      leth_bonus: myBR.leth,
-      def_bonus: myBR.def,
-      hp_bonus: myBR.hp,
-      atk_tier: myBR.tier || 'T10',
-      atk_leaders: (myBR.leaders || []).filter(Boolean),
-      atk_joiners: (myBR.joiners || []).filter(Boolean),
-      def_inf: oppBR.inf,
-      def_cav: oppBR.cav,
-      def_arch: oppBR.arch,
-      def_atk_bonus: oppBR.atk,
-      def_leth_bonus: oppBR.leth,
-      def_def_bonus: oppBR.def,
-      def_hp_bonus: oppBR.hp,
-      def_tier: oppBR.tier || 'T10',
-      def_leaders: (oppBR.leaders || []).filter(Boolean),
-      def_joiners: (oppBR.joiners || []).filter(Boolean),
-      predicted_ratio: battleResult ? battleResult.ratio : null,
-      outcome: 'unknown'
-    };
-    const res = await sbInsert('battle_reports', payload);
-    setCloudMsg(res.ok ? 'Battle report submitted!' : 'Error: ' + res.error);
-  };
-  const submitGearConfig = async () => {
-    const res = await sbInsert('gear_configs', {
-      governor_name: 'Anonymous',
-      kingdom: 'Unknown',
-      gear_data: {
-        myData,
-        myBR
-      },
-      profile_type: 'full'
-    });
-    setCloudMsg(res.ok ? 'Gear config submitted!' : 'Error: ' + res.error);
-  };
   const loadCloudData = async table => {
     if (!adminKey) {
       setCloudMsg('Enter admin passphrase first');
       return;
     }
+    if (typeof sbSelect !== 'function') {
+      setCloudMsg('Supabase not available');
+      return;
+    }
     const res = await sbSelect(table, adminKey);
     if (res.error) setCloudMsg('Error: ' + res.error);else {
       setCloudData(res.data);
-      setCloudMsg(`Loaded ${res.data?.length || 0} records from ${table}`);
+      setCloudMsg('Loaded ' + (res.data?.length || 0) + ' records from ' + table);
     }
   };
   const runOptimizers = useCallback(() => {
@@ -4598,169 +4683,235 @@ function App() {
   return /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: "100vh",
-      background: "linear-gradient(145deg, #0c1222 0%, #1a1035 50%, #0f1729 100%)",
-      color: "#e2e8f0",
-      fontFamily: "'Segoe UI', sans-serif",
-      padding: 12
+      background: C.bg,
+      color: C.text,
+      fontFamily: C.fontDisplay
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      textAlign: "center",
-      marginBottom: 12,
-      padding: "12px 0"
+      maxWidth: 1280,
+      margin: "0 auto",
+      padding: "0 16px 60px"
     }
-  }, /*#__PURE__*/React.createElement("h1", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "20px 0",
+      borderBottom: `1px solid ${C.panelBorder}`,
+      background: `linear-gradient(180deg, ${C.panel}, transparent)`,
+      margin: "0 -16px",
+      padding: "20px 16px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      background: `linear-gradient(135deg, ${C.accent}, ${C.red})`,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontSize: 18,
+      fontWeight: 900,
+      color: "#000",
+      flexShrink: 0
+    }
+  }, "K"), /*#__PURE__*/React.createElement("h1", {
     style: {
       margin: 0,
       fontSize: 20,
-      fontWeight: 900,
-      letterSpacing: 2,
-      background: "linear-gradient(135deg, #4ade80, #60a5fa, #f472b6)",
-      WebkitBackgroundClip: "text",
-      WebkitTextFillColor: "transparent"
+      fontWeight: 800,
+      letterSpacing: "-0.01em"
     }
-  }, "KINGSHOT GEAR GAP ANALYZER"), /*#__PURE__*/React.createElement("p", {
+  }, "Kingshot Gear Gap Analyzer"), /*#__PURE__*/React.createElement("span", {
+    style: S.badge(C.accent)
+  }, "PVP ENGINE V2"), /*#__PURE__*/React.createElement("span", {
+    style: S.badge(C.green)
+  }, "LIVE")), /*#__PURE__*/React.createElement("div", {
     style: {
-      margin: "3px 0 0",
-      fontSize: 10,
-      color: "#64748b",
-      letterSpacing: 1
+      marginTop: 6,
+      fontFamily: C.fontMono,
+      fontSize: 11,
+      color: C.accent,
+      background: C.inputBg,
+      padding: "4px 10px",
+      borderRadius: 4,
+      display: "inline-block"
     }
-  }, "V2 \u2022 GOV GEAR THRU RED T6 \u2022 CHARMS TO LV22 \u2022 RED HERO GEAR SUPPORT \u2022 SET BONUSES")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 3,
-      marginBottom: 12,
-      justifyContent: "center"
-    }
-  }, TABS.map(t => /*#__PURE__*/React.createElement("button", {
-    key: t.id,
-    onClick: () => setTab(t.id),
-    style: {
-      padding: "7px 16px",
-      borderRadius: 6,
-      border: "none",
-      cursor: "pointer",
-      fontSize: 12,
-      fontWeight: 700,
-      background: tab === t.id ? "linear-gradient(135deg, #4ade8022, #60a5fa22)" : "rgba(0,0,0,0.3)",
-      color: tab === t.id ? "#e2e8f0" : "#64748b",
-      transition: "all 0.2s",
-      boxShadow: tab === t.id ? "0 0 15px rgba(96,165,250,0.1)" : "none"
-    }
-  }, t.label))), tab === "compare" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "Kills = \u221ATroops \xD7 (Atk \xD7 Leth) / (Def \xD7 HP) \xD7 SkillMod")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
+      gap: 2,
+      paddingTop: 16
+    }
+  }, TABS.map(t => {
+    const tabColors = {
+      compare: C.accent,
+      recommend: C.green,
+      costs: C.violet,
+      reference: "#f472b6",
+      cloud: C.blue
+    };
+    return /*#__PURE__*/React.createElement("button", {
+      key: t.id,
+      onClick: () => setTab(t.id),
+      style: {
+        padding: "10px 20px",
+        borderRadius: "8px 8px 0 0",
+        cursor: "pointer",
+        border: `1px solid ${tab === t.id ? C.panelBorder : "transparent"}`,
+        borderBottomColor: tab === t.id ? C.panel : "transparent",
+        background: tab === t.id ? C.panel : "transparent",
+        color: tab === t.id ? tabColors[t.id] || C.text : C.textDim,
+        fontWeight: 700,
+        fontSize: 13,
+        letterSpacing: "0.02em",
+        fontFamily: C.fontDisplay,
+        transition: "all 0.2s"
+      }
+    }, t.label);
+  })), tab === "compare" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
       gap: 20,
-      padding: "8px 0",
-      marginBottom: 12
+      flexWrap: "wrap",
+      marginTop: 16,
+      marginBottom: 16
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      textAlign: "center"
+      ...S.totalBox,
+      flex: 1,
+      minWidth: 200
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.fieldLabel
+  }, "YOUR GEAR SCORE"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 26,
+      fontWeight: 800,
+      fontFamily: C.fontMono,
+      color: C.green
+    }
+  }, myScore.toFixed(0))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...S.totalBox,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "10px 20px"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 22,
-      fontWeight: 900,
-      color: "#4ade80"
+      fontSize: 14,
+      fontWeight: 800,
+      color: C.textMuted,
+      fontFamily: C.fontMono
     }
-  }, myScore.toFixed(0)), /*#__PURE__*/React.createElement("div", {
+  }, "VS")), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
-      color: "#64748b",
-      letterSpacing: 1
-    }
-  }, "YOUR SCORE")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 18,
-      color: "#475569"
-    }
-  }, "VS"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: "center"
+      ...S.totalBox,
+      flex: 1,
+      minWidth: 200,
+      textAlign: "right"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 22,
-      fontWeight: 900,
-      color: "#f87171"
+      ...S.fieldLabel,
+      textAlign: "right"
     }
-  }, oppScore.toFixed(0)), /*#__PURE__*/React.createElement("div", {
+  }, "OPPONENT SCORE"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
-      color: "#64748b",
-      letterSpacing: 1
+      fontSize: 26,
+      fontWeight: 800,
+      fontFamily: C.fontMono,
+      color: C.red
     }
-  }, "OPPONENT"))), /*#__PURE__*/React.createElement("div", {
+  }, oppScore.toFixed(0)))), /*#__PURE__*/React.createElement("div", {
+    style: S.sectionDivider
+  }, "\u2699 GOVERNOR GEAR"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: 12,
-      marginBottom: 16,
-      flexWrap: "wrap"
+      gap: 16,
+      flexWrap: "wrap",
+      marginTop: 12,
+      marginBottom: 16
     }
   }, /*#__PURE__*/React.createElement(PlayerPanel, {
     title: "You",
-    color: "#4ade80",
+    color: C.green,
     data: myData,
-    setData: setMyData
+    setData: setMyData,
+    section: "gov"
   }), /*#__PURE__*/React.createElement(PlayerPanel, {
     title: "Opponent",
-    color: "#f87171",
+    color: C.blue,
     data: oppData,
-    setData: setOppData
+    setData: setOppData,
+    section: "gov"
   })), /*#__PURE__*/React.createElement("div", {
-    style: S.card
-  }, /*#__PURE__*/React.createElement("h3", {
+    style: S.sectionDivider
+  }, "\uD83D\uDC8E CHARMS"), /*#__PURE__*/React.createElement("div", {
     style: {
-      margin: "0 0 10px",
-      fontSize: 13,
-      fontWeight: 800,
-      textAlign: "center",
-      color: "#cbd5e1",
-      letterSpacing: 1
+      display: "flex",
+      gap: 16,
+      flexWrap: "wrap",
+      marginTop: 12,
+      marginBottom: 16
     }
-  }, "STAT BREAKDOWN"), ["inf", "cav", "arch"].map(troop => /*#__PURE__*/React.createElement("div", {
-    key: troop,
+  }, /*#__PURE__*/React.createElement(PlayerPanel, {
+    title: "You",
+    color: C.green,
+    data: myData,
+    setData: setMyData,
+    section: "charm"
+  }), /*#__PURE__*/React.createElement(PlayerPanel, {
+    title: "Opponent",
+    color: C.blue,
+    data: oppData,
+    setData: setOppData,
+    section: "charm"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: S.sectionDivider
+  }, "\uD83D\uDDE1 HERO GEAR"), /*#__PURE__*/React.createElement("div", {
     style: {
-      marginBottom: 12
+      display: "flex",
+      gap: 16,
+      flexWrap: "wrap",
+      marginTop: 12,
+      marginBottom: 16
     }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      fontWeight: 800,
-      color: TROOP_COLORS[troop],
-      marginBottom: 4,
-      letterSpacing: 1
-    }
-  }, TROOP_NAMES[troop].toUpperCase()), ["atk", "def", "leth", "hp"].map(stat => /*#__PURE__*/React.createElement(StatBar, {
-    key: `${troop}_${stat}`,
-    label: STAT_LABELS[stat],
-    myVal: myStats[troop][stat],
-    oppVal: oppStats[troop][stat],
-    troop: troop
-  }))))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(PlayerPanel, {
+    title: "You",
+    color: C.green,
+    data: myData,
+    setData: setMyData,
+    section: "hero"
+  }), /*#__PURE__*/React.createElement(PlayerPanel, {
+    title: "Opponent",
+    color: C.blue,
+    data: oppData,
+    setData: setOppData,
+    section: "hero"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: S.sectionDivider
+  }, "\uD83D\uDCCB BATTLE REPORT STATS"), /*#__PURE__*/React.createElement("div", {
     style: {
       ...S.card,
-      marginTop: 12
+      marginTop: 12,
+      marginBottom: 16
     }
-  }, /*#__PURE__*/React.createElement("h3", {
-    style: {
-      margin: "0 0 4px",
-      fontSize: 13,
-      fontWeight: 800,
-      textAlign: "center",
-      color: "#f59e0b",
-      letterSpacing: 1
-    }
-  }, "\uD83D\uDCCB BATTLE REPORT STATS"), /*#__PURE__*/React.createElement("p", {
+  }, /*#__PURE__*/React.createElement("p", {
     style: {
       margin: "0 0 10px",
       fontSize: 10,
-      color: "#64748b",
-      textAlign: "center"
+      color: C.textDim
     }
   }, "Enter stats from an in-game Battle Report to simulate outcomes and see what you need to win."), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4775,7 +4926,7 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement(BattleReportPanel, {
     title: "YOUR STATS",
-    color: "#4ade80",
+    color: C.green,
     data: myBR,
     setData: setMyBR
   })), /*#__PURE__*/React.createElement("div", {
@@ -4785,71 +4936,229 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement(BattleReportPanel, {
     title: "OPPONENT STATS",
-    color: "#f87171",
+    color: C.blue,
     data: oppBR,
     setData: setOppBR
-  }))), battleResult && /*#__PURE__*/React.createElement("div", {
+  })))), /*#__PURE__*/React.createElement("div", {
+    style: S.sectionDivider
+  }, "\uD83D\uDCCA STAT BREAKDOWN"), /*#__PURE__*/React.createElement("div", {
     style: {
-      marginTop: 10,
-      padding: "10px 14px",
-      borderRadius: 8,
-      background: battleResult.ratio >= 1 ? "rgba(74,222,128,0.06)" : "rgba(239,68,68,0.06)",
-      border: `1px solid ${battleResult.ratio >= 1 ? "rgba(74,222,128,0.2)" : "rgba(239,68,68,0.2)"}`
+      ...S.card,
+      marginTop: 12,
+      marginBottom: 16
+    }
+  }, ["inf", "cav", "arch"].map(troop => /*#__PURE__*/React.createElement("div", {
+    key: troop,
+    style: {
+      marginBottom: 12
     }
   }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...S.fieldLabel,
+      color: TROOP_COLORS[troop],
+      marginBottom: 4
+    }
+  }, TROOP_NAMES[troop].toUpperCase()), ["atk", "def", "leth", "hp"].map(stat => /*#__PURE__*/React.createElement(StatBar, {
+    key: `${troop}_${stat}`,
+    label: STAT_LABELS[stat],
+    myVal: myStats[troop][stat],
+    oppVal: oppStats[troop][stat],
+    troop: troop
+  }))))), battleResult && /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...S.card,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.sectionDivider
+  }, "\u2694 DAMAGE RESULT"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      gap: 20
+      gap: 20,
+      flexWrap: "wrap",
+      marginTop: 12
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      textAlign: "center"
+      ...S.totalBox,
+      flex: 1,
+      minWidth: 150
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.fieldLabel
+  }, "YOUR DAMAGE"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 22,
+      fontWeight: 800,
+      fontFamily: C.fontMono,
+      color: C.green
+    }
+  }, battleResult.myDmg.toFixed(2))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...S.totalBox,
+      flex: 1,
+      minWidth: 150,
+      textAlign: "right"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 20,
-      fontWeight: 900,
-      color: "#4ade80"
+      ...S.fieldLabel,
+      textAlign: "right"
     }
-  }, battleResult.myDmg.toFixed(2)), /*#__PURE__*/React.createElement("div", {
+  }, "OPPONENT DAMAGE"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
-      color: "#64748b"
+      fontSize: 22,
+      fontWeight: 800,
+      fontFamily: C.fontMono,
+      color: C.red
     }
-  }, "YOUR DMG")), /*#__PURE__*/React.createElement("div", {
+  }, battleResult.oppDmg.toFixed(2)))), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 14,
-      color: "#475569"
-    }
-  }, "vs"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: "center"
+      display: "flex",
+      gap: 16,
+      flexWrap: "wrap",
+      marginTop: 12
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 20,
-      fontWeight: 900,
-      color: "#f87171"
+      ...S.totalBox,
+      flex: 1,
+      minWidth: 200
     }
-  }, battleResult.oppDmg.toFixed(2)), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
-      color: "#64748b"
+      ...S.fieldLabel,
+      color: C.green,
+      marginBottom: 6
     }
-  }, "OPP DMG"))), /*#__PURE__*/React.createElement("div", {
+  }, "YOUR TROOPS INJURED"), ["inf", "cav", "arch"].map(t => {
+    const injured = battleResult.myInjured[t] || 0;
+    const total = myBR[t] || 0;
+    const pct = total > 0 ? injured / total * 100 : 0;
+    return /*#__PURE__*/React.createElement("div", {
+      key: t,
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "4px 0",
+        borderBottom: `1px solid ${C.panelBorder}`
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        color: TROOP_COLORS[t],
+        fontWeight: 600
+      }
+    }, t === "inf" ? "⚔" : t === "cav" ? "🐴" : "🏹", " ", TROOP_NAMES[t]), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontFamily: C.fontMono,
+        fontSize: 12,
+        fontWeight: 700,
+        color: injured > 0 ? C.red : C.textDim
+      }
+    }, injured.toLocaleString(), " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 9,
+        color: C.textDim
+      }
+    }, "/ ", total.toLocaleString(), " (", pct.toFixed(1), "%)")));
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
-      textAlign: "center",
+      display: "flex",
+      justifyContent: "space-between",
       marginTop: 6
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 16,
-      fontWeight: 900,
-      color: battleResult.ratio >= 1 ? "#4ade80" : "#f87171"
+      ...S.fieldLabel,
+      marginBottom: 0
     }
-  }, battleResult.ratio >= 1 ? "✓ WINNING" : "✗ LOSING", " \u2014 Ratio: ", battleResult.ratio.toFixed(3)))))), tab === "recommend" && /*#__PURE__*/React.createElement("div", {
+  }, "TOTAL INJURED"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: C.fontMono,
+      fontSize: 14,
+      fontWeight: 800,
+      color: C.red
+    }
+  }, battleResult.myTotalInjured.toLocaleString()))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...S.totalBox,
+      flex: 1,
+      minWidth: 200
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...S.fieldLabel,
+      color: C.blue,
+      marginBottom: 6
+    }
+  }, "OPPONENT TROOPS INJURED"), ["inf", "cav", "arch"].map(t => {
+    const injured = battleResult.oppInjured[t] || 0;
+    const total = oppBR[t] || 0;
+    const pct = total > 0 ? injured / total * 100 : 0;
+    return /*#__PURE__*/React.createElement("div", {
+      key: t,
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "4px 0",
+        borderBottom: `1px solid ${C.panelBorder}`
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        color: TROOP_COLORS[t],
+        fontWeight: 600
+      }
+    }, t === "inf" ? "⚔" : t === "cav" ? "🐴" : "🏹", " ", TROOP_NAMES[t]), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontFamily: C.fontMono,
+        fontSize: 12,
+        fontWeight: 700,
+        color: injured > 0 ? C.green : C.textDim
+      }
+    }, injured.toLocaleString(), " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 9,
+        color: C.textDim
+      }
+    }, "/ ", total.toLocaleString(), " (", pct.toFixed(1), "%)")));
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      ...S.fieldLabel,
+      marginBottom: 0
+    }
+  }, "TOTAL INJURED"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: C.fontMono,
+      fontSize: 14,
+      fontWeight: 800,
+      color: C.green
+    }
+  }, battleResult.oppTotalInjured.toLocaleString())))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...S.totalBox,
+      marginTop: 8,
+      textAlign: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.fieldLabel
+  }, "BATTLE RATIO"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 28,
+      fontWeight: 800,
+      fontFamily: C.fontMono,
+      color: battleResult.ratio >= 1 ? C.green : C.red
+    }
+  }, battleResult.ratio >= 1 ? "✓ WINNING" : "✗ LOSING", " \u2014 ", battleResult.ratio.toFixed(3))))), tab === "recommend" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gap: 12
@@ -5143,17 +5452,17 @@ function App() {
       margin: "0 0 3px",
       fontSize: 15,
       fontWeight: 800,
-      color: "#cbd5e1"
+      color: C.text
     }
   }, "Top Gear Upgrade Recommendations"), /*#__PURE__*/React.createElement("p", {
     style: {
       margin: "0 0 12px",
       fontSize: 10,
-      color: "#64748b"
+      color: C.textDim
     }
   }, "Ranked by PvP impact / cost efficiency. Prioritizes closing stat gaps."), recs.length === 0 ? /*#__PURE__*/React.createElement("p", {
     style: {
-      color: "#64748b",
+      color: C.textDim,
       textAlign: "center",
       padding: 16
     }
@@ -5162,7 +5471,7 @@ function App() {
       display: "grid",
       gap: 6
     }
-  }, recs.map((r, i) => /*#__PURE__*/React.createElement("div", {
+  }, recs.slice(0, showAllRecs ? recs.length : 5).map((r, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
       display: "flex",
@@ -5170,8 +5479,8 @@ function App() {
       gap: 8,
       padding: "8px 10px",
       borderRadius: 6,
-      background: i === 0 ? "rgba(74,222,128,0.06)" : "rgba(0,0,0,0.12)",
-      border: i === 0 ? "1px solid rgba(74,222,128,0.15)" : "1px solid rgba(255,255,255,0.03)"
+      background: i === 0 ? `${C.green}0f` : C.inputBg,
+      border: i === 0 ? `1px solid ${C.green}33` : `1px solid ${C.inputBorder}`
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5183,8 +5492,8 @@ function App() {
       justifyContent: "center",
       fontWeight: 900,
       fontSize: 11,
-      background: i < 3 ? "linear-gradient(135deg, #4ade8022, #60a5fa22)" : "rgba(0,0,0,0.3)",
-      color: i < 3 ? "#4ade80" : "#64748b",
+      background: i < 3 ? `${C.green}1a` : C.inputBg,
+      color: i < 3 ? C.green : C.textDim,
       flexShrink: 0
     }
   }, i + 1), /*#__PURE__*/React.createElement("div", {
@@ -5196,7 +5505,7 @@ function App() {
     style: {
       fontSize: 11,
       fontWeight: 700,
-      color: "#e2e8f0",
+      color: C.text,
       marginBottom: 1
     }
   }, r.label), /*#__PURE__*/React.createElement("div", {
@@ -5214,7 +5523,7 @@ function App() {
   }, TROOP_NAMES[r.troop]), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 9,
-      color: "#4ade80"
+      color: C.green
     }
   }, r.statGain))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5225,14 +5534,29 @@ function App() {
     style: {
       fontSize: 13,
       fontWeight: 800,
-      color: "#fbbf24"
+      color: C.accent,
+      fontFamily: C.fontMono
     }
   }, r.efficiency.toFixed(1)), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 8,
-      color: "#64748b"
+      color: C.textDim
     }
-  }, "EFF"))))))), tab === "costs" && /*#__PURE__*/React.createElement(CostsTab, null), tab === "reference" && /*#__PURE__*/React.createElement("div", {
+  }, "EFF")))), recs.length > 5 && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowAllRecs(!showAllRecs),
+    style: {
+      padding: "8px 16px",
+      borderRadius: 6,
+      border: `1px solid ${C.inputBorder}`,
+      cursor: "pointer",
+      background: C.inputBg,
+      color: C.textDim,
+      fontSize: 11,
+      fontWeight: 600,
+      fontFamily: C.fontDisplay,
+      textAlign: "center"
+    }
+  }, showAllRecs ? `▲ Show Top 5 Only` : `▼ Show All ${recs.length} Recommendations`)))), tab === "costs" && /*#__PURE__*/React.createElement(CostsTab, null), tab === "reference" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gap: 12
@@ -5442,18 +5766,12 @@ function App() {
   }, "+", g.bonus.toFixed(2), "%")))))))), tab === "cloud" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gap: 12
+      gap: 12,
+      marginTop: 16
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: S.card
-  }, /*#__PURE__*/React.createElement("h3", {
-    style: {
-      margin: "0 0 8px",
-      fontSize: 14,
-      fontWeight: 800,
-      color: "#818cf8"
-    }
-  }, "\u2601\uFE0F Cloud Sync"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -5465,28 +5783,31 @@ function App() {
       width: 10,
       height: 10,
       borderRadius: "50%",
-      background: sbConnected ? "#4ade80" : "#ef4444",
-      boxShadow: sbConnected ? "0 0 8px #4ade8088" : "none"
+      background: sbConnected ? C.green : C.red,
+      boxShadow: sbConnected ? `0 0 8px ${C.green}88` : "none"
     }
-  }), /*#__PURE__*/React.createElement("span", {
+  }), /*#__PURE__*/React.createElement("h3", {
     style: {
-      fontSize: 12,
-      fontWeight: 700,
-      color: sbConnected ? "#4ade80" : "#ef4444"
+      margin: 0,
+      fontSize: 14,
+      fontWeight: 800,
+      color: C.violet
     }
-  }, sbConnected ? "Connected to Supabase" : "Disconnected")), /*#__PURE__*/React.createElement("p", {
+  }, "\u2601\uFE0F Cloud Sync"), /*#__PURE__*/React.createElement("span", {
+    style: S.badge(sbConnected ? C.green : C.red)
+  }, sbConnected ? "CONNECTED" : "OFFLINE")), /*#__PURE__*/React.createElement("p", {
     style: {
       fontSize: 10,
-      color: "#64748b"
+      color: C.textDim
     }
-  }, "Battle reports and gear configs submitted by anyone are stored in the cloud database. Only the admin can view submitted data. All submissions are anonymous."), cloudMsg && /*#__PURE__*/React.createElement("div", {
+  }, "Data is automatically saved to the cloud database every 3 seconds after changes. All submissions are anonymous. Only the admin can view submitted data."), cloudMsg && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 6,
       padding: "6px 10px",
       borderRadius: 4,
-      background: "rgba(0,0,0,0.2)",
+      background: C.inputBg,
       fontSize: 10,
-      color: "#94a3b8"
+      color: C.textDim
     }
   }, cloudMsg)), /*#__PURE__*/React.createElement("div", {
     style: S.card
@@ -5495,68 +5816,15 @@ function App() {
       margin: "0 0 8px",
       fontSize: 14,
       fontWeight: 800,
-      color: "#4ade80"
+      color: C.accent
     }
-  }, "\uD83D\uDCE4 Submit Data"), /*#__PURE__*/React.createElement("p", {
-    style: {
-      margin: "0 0 8px",
-      fontSize: 10,
-      color: "#64748b"
-    }
-  }, "Submit your battle reports and gear configs to help calibrate the formulas. All submissions are anonymous."), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6,
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: submitBattleReport,
-    disabled: !sbConnected,
-    style: {
-      padding: "8px 16px",
-      borderRadius: 6,
-      border: "none",
-      cursor: sbConnected ? "pointer" : "default",
-      fontSize: 11,
-      fontWeight: 700,
-      background: sbConnected ? "rgba(74,222,128,0.15)" : "rgba(0,0,0,0.2)",
-      color: sbConnected ? "#4ade80" : "#475569"
-    }
-  }, "Submit Battle Report"), /*#__PURE__*/React.createElement("button", {
-    onClick: submitGearConfig,
-    disabled: !sbConnected,
-    style: {
-      padding: "8px 16px",
-      borderRadius: 6,
-      border: "none",
-      cursor: sbConnected ? "pointer" : "default",
-      fontSize: 11,
-      fontWeight: 700,
-      background: sbConnected ? "rgba(96,165,250,0.15)" : "rgba(0,0,0,0.2)",
-      color: sbConnected ? "#60a5fa" : "#475569"
-    }
-  }, "Submit Gear Config"))), /*#__PURE__*/React.createElement("div", {
-    style: S.card
-  }, /*#__PURE__*/React.createElement("h3", {
-    style: {
-      margin: "0 0 8px",
-      fontSize: 14,
-      fontWeight: 800,
-      color: "#fbbf24"
-    }
-  }, "\uD83D\uDCC1 JSON Import / Export"), /*#__PURE__*/React.createElement("p", {
-    style: {
-      margin: "0 0 8px",
-      fontSize: 10,
-      color: "#64748b"
-    }
-  }, "Export your full configuration as a JSON file, or import a config from another player."), /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCC1 JSON Import / Export"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 6
     }
   }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => exportJSON({
+    onClick: () => typeof exportJSON === 'function' && exportJSON({
       myData,
       oppData,
       myBR,
@@ -5570,16 +5838,17 @@ function App() {
       cursor: "pointer",
       fontSize: 11,
       fontWeight: 700,
-      background: "rgba(251,191,36,0.15)",
-      color: "#fbbf24"
+      fontFamily: C.fontDisplay,
+      background: `${C.accent}22`,
+      color: C.accent
     }
   }, "\uD83D\uDCE5 Export Config"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => importJSON(data => {
+    onClick: () => typeof importJSON === 'function' && importJSON(data => {
       if (data.myData) setMyData(data.myData);
       if (data.oppData) setOppData(data.oppData);
       if (data.myBR) setMyBR(data.myBR);
       if (data.oppBR) setOppBR(data.oppBR);
-      setCloudMsg('Config imported successfully!');
+      setCloudMsg('Config imported!');
     }),
     style: {
       padding: "8px 16px",
@@ -5588,8 +5857,9 @@ function App() {
       cursor: "pointer",
       fontSize: 11,
       fontWeight: 700,
-      background: "rgba(244,114,182,0.15)",
-      color: "#f472b6"
+      fontFamily: C.fontDisplay,
+      background: `${C.violet}22`,
+      color: C.violet
     }
   }, "\uD83D\uDCE4 Import Config"))), /*#__PURE__*/React.createElement("div", {
     style: S.card
@@ -5598,15 +5868,15 @@ function App() {
       margin: "0 0 8px",
       fontSize: 14,
       fontWeight: 800,
-      color: "#ef4444"
+      color: C.red
     }
   }, "\uD83D\uDD10 Admin Panel"), /*#__PURE__*/React.createElement("p", {
     style: {
       margin: "0 0 8px",
       fontSize: 10,
-      color: "#64748b"
+      color: C.textDim
     }
-  }, "Enter admin passphrase to view submitted data. Only the admin can read data."), /*#__PURE__*/React.createElement("div", {
+  }, "Enter admin passphrase to view submitted data."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 6,
@@ -5631,29 +5901,29 @@ function App() {
   }, ["battle_reports", "gear_configs", "formula_corrections"].map(table => /*#__PURE__*/React.createElement("button", {
     key: table,
     onClick: () => loadCloudData(table),
-    disabled: !sbConnected,
     style: {
       padding: "6px 12px",
       borderRadius: 5,
       border: "none",
-      cursor: sbConnected ? "pointer" : "default",
+      cursor: "pointer",
       fontSize: 10,
       fontWeight: 600,
-      background: "rgba(239,68,68,0.1)",
-      color: sbConnected ? "#f87171" : "#475569"
+      fontFamily: C.fontDisplay,
+      background: `${C.red}18`,
+      color: C.red
     }
   }, "View ", table))), cloudData && cloudData.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       maxHeight: 300,
       overflowY: "auto",
       borderRadius: 6,
-      background: "rgba(0,0,0,0.3)",
+      background: C.inputBg,
       padding: 8
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: "#94a3b8",
+      color: C.textDim,
       marginBottom: 4
     }
   }, cloudData.length, " records"), cloudData.map((row, i) => /*#__PURE__*/React.createElement("div", {
@@ -5662,20 +5932,21 @@ function App() {
       padding: "6px 8px",
       marginBottom: 4,
       borderRadius: 4,
-      background: "rgba(0,0,0,0.2)",
+      background: C.bg,
       fontSize: 10
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#64748b"
+      color: C.textDim
     }
   }, "#", i + 1, " \u2014 ", row.created_at?.slice(0, 16) || 'N/A'), /*#__PURE__*/React.createElement("pre", {
     style: {
-      color: "#cbd5e1",
+      color: C.text,
       fontSize: 9,
       overflow: "auto",
       maxHeight: 80,
-      margin: "4px 0 0"
+      margin: "4px 0 0",
+      fontFamily: C.fontMono
     }
   }, JSON.stringify(row, null, 1).slice(0, 500)))))), /*#__PURE__*/React.createElement("div", {
     style: S.card
@@ -5684,46 +5955,42 @@ function App() {
       margin: "0 0 6px",
       fontSize: 13,
       fontWeight: 800,
-      color: "#94a3b8"
+      color: C.textDim
     }
   }, "\uD83D\uDCBE Local Storage"), /*#__PURE__*/React.createElement("p", {
     style: {
       fontSize: 10,
-      color: "#64748b"
+      color: C.textDim
     }
-  }, "Your gear configs and battle report inputs are automatically saved to your browser's LocalStorage. They persist across page refreshes. Use JSON Export to create a backup file."), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 6
-    }
-  }, /*#__PURE__*/React.createElement("button", {
+  }, "All inputs auto-save to your browser. Use JSON Export for backups."), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
-      localStorage.removeItem(LS_KEY);
-      localStorage.removeItem('ks-sb-anon-key');
+      try {
+        localStorage.removeItem(LS_KEY);
+      } catch (e) {}
       window.location.reload();
     },
     style: {
+      marginTop: 6,
       padding: "6px 12px",
       borderRadius: 5,
       border: "none",
       cursor: "pointer",
       fontSize: 10,
       fontWeight: 600,
-      background: "rgba(239,68,68,0.1)",
-      color: "#f87171"
+      fontFamily: C.fontDisplay,
+      background: `${C.red}18`,
+      color: C.red
     }
-  }, "Clear All Saved Data")))), /*#__PURE__*/React.createElement("div", {
+  }, "Clear All Saved Data"))), /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "16px 0 6px",
       fontSize: 9,
-      color: "#334155"
+      color: C.textMuted,
+      fontFamily: C.fontMono
     }
-  }, "KINGSHOT GEAR GAP ANALYZER V2 \u2022 [RED]Legendofzenzen K710 \u2022 Data: kingshot.net, kingshotwiki.com"));
+  }, "KINGSHOT GEAR GAP ANALYZER V2 \u2022 [RED]Legendofzenzen K710 \u2022 Data: kingshot.net, kingshotwiki.com")));
 }
-
-// ═══════════════════════════════════════════════════════════════
-// RENDER
-// ═══════════════════════════════════════════════════════════════
 ReactDOM.render(React.createElement(App), document.getElementById('root'));
 </script>
 </body>
