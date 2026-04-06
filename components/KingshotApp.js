@@ -4018,62 +4018,59 @@ function calcSkillMod(joinerHeroes, useEV, leaderHeroes) {
 
 // Full battle calculation — exact port
 function calcBattleFull(attacker, defender) {
-  const atkTier = TROOP_TIERS[attacker.tier] || TROOP_TIERS.T10;
-  const defTier = TROOP_TIERS[defender.tier] || TROOP_TIERS.T10;
-  const atkTotal = UNIT_TYPES.reduce((s, t) => s + (attacker.troops[t] || 0), 0);
-  const defTotal = UNIT_TYPES.reduce((s, t) => s + (defender.troops[t] || 0), 0);
-  const armyMin = Math.min(atkTotal, defTotal);
-  const atkSM = calcSkillMod(attacker.joiners || [], true, attacker.leaders || []);
-  const defSM = calcSkillMod(defender.joiners || [], true, defender.leaders || []);
-  let atkDmg = 0,
-    defDmg = 0;
-  UNIT_TYPES.forEach(t => {
-    const ac = attacker.troops[t] || 0;
-    const dc = defender.troops[t] || 0;
-    if (ac > 0) {
-      const s = atkTier[t];
-      const atkPer = s.atk * (1 + (attacker.atkBonus || 0) / 100) * (s.leth * (1 + (attacker.lethBonus || 0) / 100)) / 100;
-      const army = Math.sqrt(ac * armyMin);
-      let tDef = 0,
-        tC = 0;
-      UNIT_TYPES.forEach(dt => {
-        const d = defender.troops[dt] || 0;
-        if (d > 0) {
-          const ds = defTier[dt];
-          tDef += d * (ds.hp * (1 + (defender.hpBonus || 0) / 100)) * (ds.def * (1 + (defender.defBonus || 0) / 100)) / 100;
-          tC += d;
-        }
-      });
-      const avgDef = tC > 0 ? tDef / tC : 1;
-      let dmg = army * atkPer / avgDef / 100 * atkSM.total;
-      if (t === "Archer") dmg *= 1.10;
-      atkDmg += dmg;
-    }
-    if (dc > 0) {
-      const s = defTier[t];
-      const atkPer = s.atk * (1 + (defender.atkBonus || 0) / 100) * (s.leth * (1 + (defender.lethBonus || 0) / 100)) / 100;
-      const army = Math.sqrt(dc * armyMin);
-      let tDef = 0,
-        tC = 0;
-      UNIT_TYPES.forEach(dt => {
-        const d = attacker.troops[dt] || 0;
-        if (d > 0) {
-          const ds = atkTier[dt];
-          tDef += d * (ds.hp * (1 + (attacker.hpBonus || 0) / 100)) * (ds.def * (1 + (attacker.defBonus || 0) / 100)) / 100;
-          tC += d;
-        }
-      });
-      const avgDef = tC > 0 ? tDef / tC : 1;
-      let dmg = army * atkPer / avgDef / 100 * defSM.total;
-      if (t === "Archer") dmg *= 1.10;
-      defDmg += dmg;
-    }
+  // Use the same formula as simulateBattle but with SkillMod from hero joiners
+  var TROOP_MAP = { Infantry: "inf", Cavalry: "cav", Archer: "arch" };
+  var troopAdvantage = { inf: "cav", cav: "arch", arch: "inf" };
+
+  var atkTotal = (attacker.troops.Infantry || 0) + (attacker.troops.Cavalry || 0) + (attacker.troops.Archer || 0);
+  var defTotal = (defender.troops.Infantry || 0) + (defender.troops.Cavalry || 0) + (defender.troops.Archer || 0);
+  var armyMin = Math.min(atkTotal, defTotal);
+
+  var atkSM = calcSkillMod(attacker.joiners || [], true, attacker.leaders || []);
+  var defSM = calcSkillMod(defender.joiners || [], true, defender.leaders || []);
+
+  var atkDmg = 0, defDmg = 0;
+
+  UNIT_TYPES.forEach(function(T) {
+    var t = TROOP_MAP[T]; // "inf", "cav", "arch"
+    var myT = attacker.troops[T] || 0;
+    var oppT = defender.troops[T] || 0;
+
+    // Get per-troop-type stats (same as simulateBattle)
+    var myAtk = 1 + ((attacker.stats && attacker.stats[t] ? attacker.stats[t].atk : attacker.atkBonus) || 0) / 100;
+    var myLeth = 1 + ((attacker.stats && attacker.stats[t] ? attacker.stats[t].leth : attacker.lethBonus) || 0) / 100;
+    var oppDef = 1 + ((defender.stats && defender.stats[t] ? defender.stats[t].def : defender.defBonus) || 0) / 100;
+    var oppHp = 1 + ((defender.stats && defender.stats[t] ? defender.stats[t].hp : defender.hpBonus) || 0) / 100;
+
+    var oppAtk = 1 + ((defender.stats && defender.stats[t] ? defender.stats[t].atk : defender.atkBonus) || 0) / 100;
+    var oppLeth = 1 + ((defender.stats && defender.stats[t] ? defender.stats[t].leth : defender.lethBonus) || 0) / 100;
+    var myDef = 1 + ((attacker.stats && attacker.stats[t] ? attacker.stats[t].def : attacker.defBonus) || 0) / 100;
+    var myHp = 1 + ((attacker.stats && attacker.stats[t] ? attacker.stats[t].hp : attacker.hpBonus) || 0) / 100;
+
+    // Daryl's formula: Kills = √(Troops × ArmyMin) × (ATK × Leth) / (Def × HP) × SkillMod
+    var myArmy = myT > 0 ? Math.sqrt(myT * armyMin) : 0;
+    var oppArmy = oppT > 0 ? Math.sqrt(oppT * armyMin) : 0;
+
+    var myDmgT = myArmy > 0 ? myArmy * (myAtk * myLeth) / ((oppDef * oppHp) || 1) * atkSM.total : 0;
+    var oppDmgT = oppArmy > 0 ? oppArmy * (oppAtk * oppLeth) / ((myDef * myHp) || 1) * defSM.total : 0;
+
+    // Troop advantage: +10% proportional to how much of the enemy is the weak type
+    var weakType = troopAdvantage[t];
+    var weakTroopKey = weakType === "inf" ? "Infantry" : weakType === "cav" ? "Cavalry" : "Archer";
+    var oppWeakPct = defTotal > 0 ? (defender.troops[weakTroopKey] || 0) / defTotal : 0;
+    var myWeakPct = atkTotal > 0 ? (attacker.troops[weakTroopKey] || 0) / atkTotal : 0;
+    myDmgT *= (1 + 0.10 * oppWeakPct);
+    oppDmgT *= (1 + 0.10 * myWeakPct);
+
+    atkDmg += myDmgT;
+    defDmg += oppDmgT;
   });
+
   return {
-    atkDmg,
-    defDmg,
-    atkSM,
-    defSM,
+    atkDmg: atkDmg,
+    defDmg: defDmg,
+    atkSM: atkSM,
+    defSM: defSM,
     ratio: atkDmg / (defDmg || 1)
   };
 }
@@ -4613,30 +4610,30 @@ function App() {
 
   // Full battle calc with heroes (for joiner/formation optimizer)
   const fullBattleAtk = useMemo(() => ({
-    tier: myBR.infTier || "T10",
     troops: {
       Infantry: myBR.inf || 0,
       Cavalry: myBR.cav || 0,
       Archer: myBR.arch || 0
     },
-    atkBonus: ((myBR.infAtk || 0) + (myBR.cavAtk || 0) + (myBR.archAtk || 0)) / 3,
-    lethBonus: ((myBR.infLeth || 0) + (myBR.cavLeth || 0) + (myBR.archLeth || 0)) / 3,
-    defBonus: ((myBR.infDef || 0) + (myBR.cavDef || 0) + (myBR.archDef || 0)) / 3,
-    hpBonus: ((myBR.infHp || 0) + (myBR.cavHp || 0) + (myBR.archHp || 0)) / 3,
+    stats: {
+      inf: { atk: myBR.infAtk || 0, leth: myBR.infLeth || 0, def: myBR.infDef || 0, hp: myBR.infHp || 0 },
+      cav: { atk: myBR.cavAtk || 0, leth: myBR.cavLeth || 0, def: myBR.cavDef || 0, hp: myBR.cavHp || 0 },
+      arch: { atk: myBR.archAtk || 0, leth: myBR.archLeth || 0, def: myBR.archDef || 0, hp: myBR.archHp || 0 }
+    },
     leaders: (myBR.leaders || []).filter(Boolean),
     joiners: (myBR.joiners || []).filter(Boolean)
   }), [myBR]);
   const fullBattleDef = useMemo(() => ({
-    tier: oppBR.infTier || "T10",
     troops: {
       Infantry: oppBR.inf || 0,
       Cavalry: oppBR.cav || 0,
       Archer: oppBR.arch || 0
     },
-    atkBonus: ((oppBR.infAtk || 0) + (oppBR.cavAtk || 0) + (oppBR.archAtk || 0)) / 3,
-    lethBonus: ((oppBR.infLeth || 0) + (oppBR.cavLeth || 0) + (oppBR.archLeth || 0)) / 3,
-    defBonus: ((oppBR.infDef || 0) + (oppBR.cavDef || 0) + (oppBR.archDef || 0)) / 3,
-    hpBonus: ((oppBR.infHp || 0) + (oppBR.cavHp || 0) + (oppBR.archHp || 0)) / 3,
+    stats: {
+      inf: { atk: oppBR.infAtk || 0, leth: oppBR.infLeth || 0, def: oppBR.infDef || 0, hp: oppBR.infHp || 0 },
+      cav: { atk: oppBR.cavAtk || 0, leth: oppBR.cavLeth || 0, def: oppBR.cavDef || 0, hp: oppBR.cavHp || 0 },
+      arch: { atk: oppBR.archAtk || 0, leth: oppBR.archLeth || 0, def: oppBR.archDef || 0, hp: oppBR.archHp || 0 }
+    },
     leaders: (oppBR.leaders || []).filter(Boolean),
     joiners: (oppBR.joiners || []).filter(Boolean)
   }), [oppBR]);
