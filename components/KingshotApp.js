@@ -4044,79 +4044,150 @@ function getBaseStats(troopType, tier, tg) {
 }
 
 function calcBattleFull(attacker, defender) {
-  // Battle formula using base troop stats from kingshotsimulator.com
-  // Damage = Troops × BaseAtk × (1 + AtkBonus%) × BaseLeth × (1 + LethBonus%)
-  //        / (BaseHP_enemy × (1 + HPBonus%) × BaseDef_enemy × (1 + DefBonus%))
-  //        × SkillMod
-  var TROOP_MAP = { Infantry: "inf", Cavalry: "cav", Archer: "arch" };
-  var troopAdvantage = { inf: "cav", cav: "arch", arch: "inf" };
+  // Round-by-round battle simulation with frontline targeting
+  // Deploy order: Infantry (front) → Cavalry (mid) → Archers (back)
+  // All troops attack the frontmost surviving enemy line
+  // 20% of cavalry bypass frontline to dive enemy archers
+  var ADVANTAGE = { inf: "cav", cav: "arch", arch: "inf" };
+  var CAV_DIVE = 0.20;
+  var MAX_ROUNDS = 50;
 
-  var atkTotal = (attacker.troops.Infantry || 0) + (attacker.troops.Cavalry || 0) + (attacker.troops.Archer || 0);
-  var defTotal = (defender.troops.Infantry || 0) + (defender.troops.Cavalry || 0) + (defender.troops.Archer || 0);
-
+  // Compute skill mods once
   var atkSM = calcSkillMod(attacker.joiners || [], true, attacker.leaders || []);
   var defSM = calcSkillMod(defender.joiners || [], true, defender.leaders || []);
+  var atkOff = atkSM.damageUp * atkSM.oppDefDown;
+  var defDef = defSM.oppDmgDown * defSM.defUp;
+  var defOff = defSM.damageUp * defSM.oppDefDown;
+  var atkDef = atkSM.oppDmgDown * atkSM.defUp;
 
-  var atkDmg = 0, defDmg = 0;
+  // Pre-compute damage per troop and effective HP per troop for each type/side
+  var aDpt = {}, aEhp = {}, dDpt = {}, dEhp = {};
+  var types = ["inf", "cav", "arch"];
+  for (var i = 0; i < 3; i++) {
+    var T = types[i];
+    var aBase = getBaseStats(T, attacker[T + "Tier"] || "T10", attacker[T + "Tg"] != null ? attacker[T + "Tg"] : 5);
+    var dBase = getBaseStats(T, defender[T + "Tier"] || "T10", defender[T + "Tg"] != null ? defender[T + "Tg"] : 5);
+    var aS = (attacker.stats && attacker.stats[T]) || {};
+    var dS = (defender.stats && defender.stats[T]) || {};
+    // Damage per troop per round = baseAtk * (1+atk%) * (1+leth%) / 100
+    aDpt[T] = aBase.atk * (1 + (aS.atk || 0) / 100) * (1 + (aS.leth || 0) / 100) / 100;
+    dDpt[T] = dBase.atk * (1 + (dS.atk || 0) / 100) * (1 + (dS.leth || 0) / 100) / 100;
+    // Effective HP per troop = baseHp * (1+hp%) * (1+def%)
+    aEhp[T] = aBase.hp * (1 + (aS.hp || 0) / 100) * (1 + (aS.def || 0) / 100);
+    dEhp[T] = dBase.hp * (1 + (dS.hp || 0) / 100) * (1 + (dS.def || 0) / 100);
+  }
 
-  // Separate offensive and defensive skill components
-  var myOffense = atkSM.damageUp * atkSM.oppDefDown;
-  var defDefense = defSM.oppDmgDown * defSM.defUp;
-  var oppOffense = defSM.damageUp * defSM.oppDefDown;
-  var atkDefense = atkSM.oppDmgDown * atkSM.defUp;
+  // Mutable troop counts (fractional to avoid rounding error)
+  var ai = attacker.troops.Infantry || 0;
+  var ac = attacker.troops.Cavalry || 0;
+  var aa = attacker.troops.Archer || 0;
+  var di = defender.troops.Infantry || 0;
+  var dc = defender.troops.Cavalry || 0;
+  var da = defender.troops.Archer || 0;
 
-  UNIT_TYPES.forEach(function(T) {
-    var t = TROOP_MAP[T];
-    var myT = attacker.troops[T] || 0;
-    var oppT = defender.troops[T] || 0;
+  var totalAtkDmg = 0, totalDefDmg = 0;
 
-    // Get base stats for this troop type and tier/TG
-    var myTier = (attacker[t + "Tier"]) || "T10";
-    var myTg = (attacker[t + "Tg"]) != null ? attacker[t + "Tg"] : 5;
-    var oppTier = (defender[t + "Tier"]) || "T10";
-    var oppTg = (defender[t + "Tg"]) != null ? defender[t + "Tg"] : 5;
-    var myBase = getBaseStats(t, myTier, myTg);
-    var oppBase = getBaseStats(t, oppTier, oppTg);
+  // Helper: kills from count troops of atkType against targetType
+  var calcKills = function(count, dpt, targetEhp, atkType, targetType, offMod, defMod) {
+    if (count <= 0) return 0;
+    var dmg = count * dpt * offMod / (defMod || 1);
+    if (ADVANTAGE[atkType] === targetType) dmg *= 1.10;
+    return dmg / (targetEhp || 1);
+  };
 
-    // Stat bonuses from BR (percentage bonuses on top of base stats)
-    var myAtkBonus = ((attacker.stats && attacker.stats[t] ? attacker.stats[t].atk : attacker.atkBonus) || 0) / 100;
-    var myLethBonus = ((attacker.stats && attacker.stats[t] ? attacker.stats[t].leth : attacker.lethBonus) || 0) / 100;
-    var oppDefBonus = ((defender.stats && defender.stats[t] ? defender.stats[t].def : defender.defBonus) || 0) / 100;
-    var oppHpBonus = ((defender.stats && defender.stats[t] ? defender.stats[t].hp : defender.hpBonus) || 0) / 100;
+  for (var round = 0; round < MAX_ROUNDS; round++) {
+    // Find frontlines
+    var dFront = di > 0 ? "inf" : dc > 0 ? "cav" : da > 0 ? "arch" : null;
+    var aFront = ai > 0 ? "inf" : ac > 0 ? "cav" : aa > 0 ? "arch" : null;
+    if (!dFront || !aFront) break;
 
-    var oppAtkBonus = ((defender.stats && defender.stats[t] ? defender.stats[t].atk : defender.atkBonus) || 0) / 100;
-    var oppLethBonus = ((defender.stats && defender.stats[t] ? defender.stats[t].leth : defender.lethBonus) || 0) / 100;
-    var myDefBonus = ((attacker.stats && attacker.stats[t] ? attacker.stats[t].def : attacker.defBonus) || 0) / 100;
-    var myHpBonus = ((attacker.stats && attacker.stats[t] ? attacker.stats[t].hp : attacker.hpBonus) || 0) / 100;
+    // === Attacker deals damage to defender ===
+    var kDi = 0, kDc = 0, kDa = 0; // kills on defender inf/cav/arch
 
-    // Damage = Troops × BaseAtk × (1+AtkBonus) × (1+LethBonus)
-    //        / (BaseHP_enemy × (1+HPBonus) × (1+DefBonus))
-    var myDmgT = myT > 0 ? myT * myBase.atk * (1 + myAtkBonus) * (1 + myLethBonus)
-      / ((oppBase.hp * (1 + oppHpBonus) * (1 + oppDefBonus)) || 1)
-      * myOffense / (defDefense || 1) : 0;
+    // Infantry and archers attack defender frontline
+    var infK = calcKills(ai, aDpt.inf, dEhp[dFront], "inf", dFront, atkOff, defDef);
+    var archK = calcKills(aa, aDpt.arch, dEhp[dFront], "arch", dFront, atkOff, defDef);
 
-    var oppDmgT = oppT > 0 ? oppT * oppBase.atk * (1 + oppAtkBonus) * (1 + oppLethBonus)
-      / ((myBase.hp * (1 + myHpBonus) * (1 + myDefBonus)) || 1)
-      * oppOffense / (atkDefense || 1) : 0;
+    // Cavalry: 80% attack front, 20% dive archers (if archers behind front)
+    var cavMainK = 0, cavDiveK = 0;
+    if (ac > 0) {
+      if (dFront !== "arch" && da > 0) {
+        var mainC = Math.floor(ac * (1 - CAV_DIVE));
+        var diveC = ac - mainC;
+        cavMainK = calcKills(mainC, aDpt.cav, dEhp[dFront], "cav", dFront, atkOff, defDef);
+        cavDiveK = calcKills(diveC, aDpt.cav, dEhp.arch, "cav", "arch", atkOff, defDef);
+      } else {
+        cavMainK = calcKills(ac, aDpt.cav, dEhp[dFront], "cav", dFront, atkOff, defDef);
+      }
+    }
 
-    // Troop advantage: +10% proportional to how much of the enemy is the weak type
-    var weakType = troopAdvantage[t];
-    var weakTroopKey = weakType === "inf" ? "Infantry" : weakType === "cav" ? "Cavalry" : "Archer";
-    var oppWeakPct = defTotal > 0 ? (defender.troops[weakTroopKey] || 0) / defTotal : 0;
-    var myWeakPct = atkTotal > 0 ? (attacker.troops[weakTroopKey] || 0) / atkTotal : 0;
-    myDmgT *= (1 + 0.10 * oppWeakPct);
-    oppDmgT *= (1 + 0.10 * myWeakPct);
+    // Accumulate kills by target line
+    var frontKillsD = infK + archK + cavMainK;
+    if (dFront === "inf") kDi += frontKillsD;
+    else if (dFront === "cav") kDc += frontKillsD;
+    else kDa += frontKillsD;
+    kDa += cavDiveK;
 
-    atkDmg += myDmgT;
-    defDmg += oppDmgT;
-  });
+    // === Defender deals damage to attacker (mirror) ===
+    var kAi = 0, kAc = 0, kAa = 0;
+
+    var dInfK = calcKills(di, dDpt.inf, aEhp[aFront], "inf", aFront, defOff, atkDef);
+    var dArchK = calcKills(da, dDpt.arch, aEhp[aFront], "arch", aFront, defOff, atkDef);
+
+    var dCavMainK = 0, dCavDiveK = 0;
+    if (dc > 0) {
+      if (aFront !== "arch" && aa > 0) {
+        var dMainC = Math.floor(dc * (1 - CAV_DIVE));
+        var dDiveC = dc - dMainC;
+        dCavMainK = calcKills(dMainC, dDpt.cav, aEhp[aFront], "cav", aFront, defOff, atkDef);
+        dCavDiveK = calcKills(dDiveC, dDpt.cav, aEhp.arch, "cav", "arch", defOff, atkDef);
+      } else {
+        dCavMainK = calcKills(dc, dDpt.cav, aEhp[aFront], "cav", aFront, defOff, atkDef);
+      }
+    }
+
+    var frontKillsA = dInfK + dArchK + dCavMainK;
+    if (aFront === "inf") kAi += frontKillsA;
+    else if (aFront === "cav") kAc += frontKillsA;
+    else kAa += frontKillsA;
+    kAa += dCavDiveK;
+
+    // === Apply kills with overflow (simultaneous — based on start-of-round counts) ===
+    // Defender losses
+    var dDmgRound = 0;
+    // Infantry line
+    if (kDi > di) { dDmgRound += di * dEhp.inf; var exD = (kDi - di) * dEhp.inf; kDc += exD / (dEhp.cav || 1); di = 0; }
+    else { dDmgRound += kDi * dEhp.inf; di -= kDi; }
+    // Cavalry line
+    if (kDc > dc) { dDmgRound += dc * dEhp.cav; var exD2 = (kDc - dc) * dEhp.cav; kDa += exD2 / (dEhp.arch || 1); dc = 0; }
+    else { dDmgRound += kDc * dEhp.cav; dc -= kDc; }
+    // Archer line
+    if (kDa > da) { dDmgRound += da * dEhp.arch; da = 0; }
+    else { dDmgRound += kDa * dEhp.arch; da -= kDa; }
+
+    // Attacker losses
+    var aDmgRound = 0;
+    if (kAi > ai) { aDmgRound += ai * aEhp.inf; var exA = (kAi - ai) * aEhp.inf; kAc += exA / (aEhp.cav || 1); ai = 0; }
+    else { aDmgRound += kAi * aEhp.inf; ai -= kAi; }
+    if (kAc > ac) { aDmgRound += ac * aEhp.cav; var exA2 = (kAc - ac) * aEhp.cav; kAa += exA2 / (aEhp.arch || 1); ac = 0; }
+    else { aDmgRound += kAc * aEhp.cav; ac -= kAc; }
+    if (kAa > aa) { aDmgRound += aa * aEhp.arch; aa = 0; }
+    else { aDmgRound += kAa * aEhp.arch; aa -= kAa; }
+
+    totalAtkDmg += dDmgRound;
+    totalDefDmg += aDmgRound;
+
+    // Clamp
+    di = Math.max(0, di); dc = Math.max(0, dc); da = Math.max(0, da);
+    ai = Math.max(0, ai); ac = Math.max(0, ac); aa = Math.max(0, aa);
+  }
 
   return {
-    atkDmg: atkDmg,
-    defDmg: defDmg,
+    atkDmg: totalAtkDmg,
+    defDmg: totalDefDmg,
     atkSM: atkSM,
     defSM: defSM,
-    ratio: atkDmg / (defDmg || 1)
+    ratio: totalAtkDmg / (totalDefDmg || 1)
   };
 }
 
