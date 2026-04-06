@@ -4031,6 +4031,14 @@ function calcBattleFull(attacker, defender) {
 
   var atkDmg = 0, defDmg = 0;
 
+  // Separate offensive and defensive skill components
+  // Offensive skills (DamageUp, OppDefenseDown) boost your own damage output
+  // Defensive skills (DefenseUp, OppDamageDown) reduce the opponent's damage to you
+  var myOffense = atkSM.damageUp * atkSM.oppDefDown;
+  var defDefense = defSM.oppDmgDown * defSM.defUp;
+  var oppOffense = defSM.damageUp * defSM.oppDefDown;
+  var atkDefense = atkSM.oppDmgDown * atkSM.defUp;
+
   UNIT_TYPES.forEach(function(T) {
     var t = TROOP_MAP[T]; // "inf", "cav", "arch"
     var myT = attacker.troops[T] || 0;
@@ -4051,8 +4059,8 @@ function calcBattleFull(attacker, defender) {
     var myArmy = myT > 0 ? Math.sqrt(myT * armyMin) : 0;
     var oppArmy = oppT > 0 ? Math.sqrt(oppT * armyMin) : 0;
 
-    var myDmgT = myArmy > 0 ? myArmy * (myAtk * myLeth) / ((oppDef * oppHp) || 1) * atkSM.total : 0;
-    var oppDmgT = oppArmy > 0 ? oppArmy * (oppAtk * oppLeth) / ((myDef * myHp) || 1) * defSM.total : 0;
+    var myDmgT = myArmy > 0 ? myArmy * (myAtk * myLeth) / ((oppDef * oppHp) || 1) * myOffense / (defDefense || 1) : 0;
+    var oppDmgT = oppArmy > 0 ? oppArmy * (oppAtk * oppLeth) / ((myDef * myHp) || 1) * oppOffense / (atkDefense || 1) : 0;
 
     // Troop advantage: +10% proportional to how much of the enemy is the weak type
     var weakType = troopAdvantage[t];
