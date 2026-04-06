@@ -4069,9 +4069,9 @@ function calcBattleFull(attacker, defender) {
     var dBase = getBaseStats(T, defender[T + "Tier"] || "T10", defender[T + "Tg"] != null ? defender[T + "Tg"] : 5);
     var aS = (attacker.stats && attacker.stats[T]) || {};
     var dS = (defender.stats && defender.stats[T]) || {};
-    // Damage per troop per round = baseAtk * (1+atk%) * (1+leth%) / 100
-    aDpt[T] = aBase.atk * (1 + (aS.atk || 0) / 100) * (1 + (aS.leth || 0) / 100) / 100;
-    dDpt[T] = dBase.atk * (1 + (dS.atk || 0) / 100) * (1 + (dS.leth || 0) / 100) / 100;
+    // Damage per troop per round = baseAtk * (1+atk%) * (1+leth%)
+    aDpt[T] = aBase.atk * (1 + (aS.atk || 0) / 100) * (1 + (aS.leth || 0) / 100);
+    dDpt[T] = dBase.atk * (1 + (dS.atk || 0) / 100) * (1 + (dS.leth || 0) / 100);
     // Effective HP per troop = baseHp * (1+hp%) * (1+def%)
     aEhp[T] = aBase.hp * (1 + (aS.hp || 0) / 100) * (1 + (aS.def || 0) / 100);
     dEhp[T] = dBase.hp * (1 + (dS.hp || 0) / 100) * (1 + (dS.def || 0) / 100);
